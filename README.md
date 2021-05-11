@@ -1,0 +1,1 @@
+Project #4 in the OpenCV Computer Vision 1 course.  In this project, object detection using a TinyYolov3 trained on the COCO dataset is combined with object tracking from the OpenCV libraries.  The code is in Python.
