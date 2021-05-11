@@ -4,27 +4,18 @@
 # MODEL_PATH + "yolov3-tiny.cfg"                 # Using tiny-yolo!
 # MODEL_PATH + "yolov3-tiny.weights"
 
-import sys
+import sys                          # Python 3.8.5
 import os.path
-import math
-import numpy as np
-import cv2
-import matplotlib.pyplot as plt
+import numpy as np                  # 1.19.2
+import cv2                          # 4.5.2.52
+import matplotlib.pyplot as plt     # 3.3.4
+
 DATA_PATH="../data/"
 MODEL_PATH="../models/"
-#from dataPath import DATA_PATH
-#from dataPath import MODEL_PATH
-
-#%matplotlib inline
-#import matplotlib
-#matplotlib.rcParams['figure.figsize'] = (25.0,25.0)
-#matplotlib.rcParams['image.cmap'] = 'gray'
-
-# Functions
 
 # Initialize tracker
 def initTracker(tracker_type):
-
+    global tracker
     if tracker_type == 'MIL':
         tracker = cv2.TrackerMIL_create()
     elif tracker_type == 'KCF':
@@ -42,10 +33,9 @@ def initTracker(tracker_type):
         for t in trackerTypes:
             print(t)
             
-    return tracker
-            
 # Grow bounding box due to fast-yolo small bounding boxes
-def growBoundingBox(bbox, scaleFactor):
+def growBoundingBox(bbox):
+    # Center x,y from upper-left corner and width,height
     cx = bbox[0] + bbox[2] // 2
     cy = bbox[1] + bbox[3] // 2
     
@@ -54,7 +44,7 @@ def growBoundingBox(bbox, scaleFactor):
     MAXSIZE = 300
     
     maxDim = max(bbox[2], bbox[3])
-    newSize = maxDim * scaleFactor;
+    newSize = maxDim * 2.2;
     
     if (newSize == 0):
         pass    
@@ -63,38 +53,7 @@ def growBoundingBox(bbox, scaleFactor):
     elif (newSize < MINSIZE):
         newSize = MINSIZE
     
-    return (cx - newSize // 2, cy - newSize // 2, newSize, newSize)
-    
-def initTrackerWithGrowingBox(tracker_type, frame, detectBox):
-    scaleFactor = 1.0
-    tracker = initTracker(tracker_type)
-    trackerOk = tracker.init(frame, growBoundingBox(detectBox, scaleFactor))
-    trackerOk, trackBox = tracker.update(frame)
-    while (not trackerOk and scaleFactor <= 3.0):
-        scaleFactor += 0.2
-        tracker = initTracker(tracker_type)
-        trackerOk = tracker.init(frame, growBoundingBox(detectBox, scaleFactor))
-        trackerOk, trackBox = tracker.update(frame)
-        
-    scaleFactor += 1.0
-    tracker = initTracker(tracker_type)
-    trackerOk = tracker.init(frame, growBoundingBox(detectBox, scaleFactor))
-    trackerOk, trackBox = tracker.update(frame)
-    
-    return tracker, trackerOk, trackBox
-    
-def drawBox(frame, bbox, color):
-    p1 = (int(bbox[0]), int(bbox[1]))
-    p2 = (int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3]))
-    cv2.rectangle(frame, p1, p2, color, 2, 1)
-    
-def distanceBetweenBoxes(box1, box2):
-    x1 = box1[0] + box1[2] / 2.0
-    y1 = box1[1] + box1[3] / 2.0
-    x2 = box2[0] + box2[2] / 2.0
-    y2 = box2[1] + box2[3] / 2.0
-
-    return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+    return (cx - newSize // 2, cy - newSize // 2, newSize, newSize)  
 
 # Get the names of the output layers
 def getOutputsNames(net):
@@ -131,8 +90,10 @@ def postprocess(frame, outs):
     classIds = []
     confidences = []
     boxes = []
-
+    foundball = False
     for out in outs:
+        if foundball == True:
+            break
         
         for detection in out:
             if detection[4] > objectnessThreshold :
@@ -152,41 +113,24 @@ def postprocess(frame, outs):
                     classIds.append(classId)
                     confidences.append(float(confidence))
                     boxes.append([left, top, width, height])
-    
-    if len(boxes) == 0:
-        return (0, 0, 0, 0), 0
-    
-    # Find the largest bounding box
-    maxWidth = 0
-    maxIndex = 0
-    i = 0
-    for box in boxes:
-        if (box[2] > maxWidth or box[3] > maxWidth):
-            maxWidth = max(box[2], box[3])
-            maxIndex = i
-        i += 1
+                    foundball = True
+                    break
 
-    # Make it square
-    boxes[maxIndex][2] = maxWidth
-    boxes[maxIndex][3] = maxWidth
-
-    return boxes[maxIndex], confidences[maxIndex]
-
-    # # Perform non maximum suppression to eliminate redundant overlapping boxes with
-    # # lower confidences.
-    # indices = cv2.dnn.NMSBoxes(boxes, confidences, confThreshold, nmsThreshold)
-    # for i in indices:
-        # i = i[0]
-        # box = boxes[i]
-        # left = box[0]
-        # top = box[1]
-        # width = box[2]
-        # height = box[3]
-        # drawPred(classIds[i], confidences[i], left, top, left + width, top + height)
+    # Perform non maximum suppression to eliminate redundant overlapping boxes with
+    # lower confidences.
+    indices = cv2.dnn.NMSBoxes(boxes, confidences, confThreshold, nmsThreshold)
+    for i in indices:
+        i = i[0]
+        box = boxes[i]
+        left = box[0]
+        top = box[1]
+        width = box[2]
+        height = box[3]
+        drawPred(classIds[i], confidences[i], left, top, left + width, top + height)
         
-        # return boxes, confidences
+        return (left, top, width, height), confidences[i]
     
-    # return (0, 0, 0, 0), 0.0
+    return (0, 0, 0, 0), 0.0
     
 # Deep Neural Network setup
 
@@ -207,13 +151,13 @@ net = cv2.dnn.readNetFromDarknet(modelConfiguration, modelWeights)
 # Initialize the parameters
 objectnessThreshold = 0.5 # Objectness threshold
 confThreshold = 0.5       # Confidence threshold
-nmsThreshold = 0.9        # Non-maximum suppression threshold
+nmsThreshold = 0.2        # Non-maximum suppression threshold
 #inpWidth = 416            # Width of network's input image
 #inpHeight = 416           # Height of network's input image
 inpWidth = 320            # Width of network's input image
 inpHeight = 320           # Height of network's input image
 
-trackIndex = 4;
+trackIndex = 1;
 videoIndex = 0;
 tracker_types = ['MIL', 'KCF', 'MEDIANFLOW', 'CSRT', 'MOSSE']
 videos = ['soccer-ball', 'hockey', 'cycle', 'meeting']
@@ -252,13 +196,11 @@ count = 0
 trackerOk = False
 while True:
     # Read a new frame
-    ok, frame = video.read()   
+    ok, frame = video.read()
     if not ok:
         break
 
-    detectConf = 0
-    if (not trackerOk or count % 10 == 0):
-        
+    if (not trackerOk):
         # Create a 4D blob from a frame.
         blob = cv2.dnn.blobFromImage(frame, 1/255, (inpWidth, inpHeight), [0,0,0], 1, crop=False)
 
@@ -269,65 +211,41 @@ while True:
         outs = net.forward(getOutputsNames(net))
 
         # Remove the bounding boxes with low confidence
-        detectBox, detectConf = postprocess(frame, outs)
-        detectTiming, _ = net.getPerfProfile()
-        
-        # Draw rectangle
-        p1 = (int(detectBox[0]), int(detectBox[1]))
-        p2 = (int(detectBox[0] + detectBox[2]), int(detectBox[1] + detectBox[3]))
-        cv2.rectangle(frame, p1, p2, blue, 2, 1)    
-        # if trackerOk:
-            # # Tracking success
-            # pass
-        # else:
-            # # Tracking failure
-            # cv2.putText(frame, "Tracking failure detected", (20,80), cv2.FONT_HERSHEY_SIMPLEX, 0.75, red, 2)        
+        bbox, confidence_yolo = postprocess(frame, outs)
+        bbox = growBoundingBox(bbox)
+        bbox_yolo = bbox
+        t, _ = net.getPerfProfile()
 
     # Start timer
-    timer = cv2.getTickCount()
+    timer = cv2.getTickCount()    
     
-    # Update tracker
-    if (trackerOk and tracker != None):
-        trackerOk, trackBox = tracker.update(frame)
+    # Initialize tracker
+    if (not trackerOk and confidence_yolo > 0):
+        initTracker(tracker_type)
+        tracker.init(frame, [int(i) for i in bbox_yolo])
+        trackerOk = True
+        print("Frame: " + str(count) + "  -----------------------> Object detection <----------------------")
+    elif (not trackerOk):
+        print("Frame: " + str(count) + "  ERROR - Unable to track")
+    else:
+        print("Frame: " + str(count) + "  Object tracking")
+        trackerOk, bbox = tracker.update(frame)
     
     # Calculate Frames per second (FPS)
     fps = cv2.getTickFrequency() / (cv2.getTickCount() - timer);
     trackTime = 1000 / fps;
-    
-    # Initialize tracker
-    if (not trackerOk and detectConf > 0):
-        # Reacquire using detector
-        #tracker = initTracker(tracker_type)
-        #trackerOk = tracker.init(frame, tuple(detectBox))
-        #trackerOk = tracker.init(frame, growBoundingBox(detectBox, scaleFactor))
-        tracker, trackerOk, trackBox = initTrackerWithGrowingBox(tracker_type, frame, detectBox)
-        #trackerOk, trackBox = tracker.update(frame)
-        if (trackerOk):
-            #print("Frame: " + str(count) + "  Initialized tracker")
-            drawBox(frame, trackBox, green)
-        else:
-            print("Frame: " + str(count) + "  ERROR - Unable to initialize tracker with given bounding box")
-            cv2.putText(frame, "Tracking failure detected", (20,80), cv2.FONT_HERSHEY_SIMPLEX, 0.75, red, 2)
-    elif (not trackerOk and detectConf <= 0):
-        print("Frame: " + str(count) + "  ERROR - Tracking and detection failed")
-        cv2.putText(frame, "Tracking failure detected", (20,80), cv2.FONT_HERSHEY_SIMPLEX, 0.75, red, 2)
-    elif (trackerOk and detectConf > 0):
 
-        d = distanceBetweenBoxes(detectBox, trackBox)
-        if (d > 50):
-            
-            newTracker, newTrackerOk, newTrackBox = initTrackerWithGrowingBox(tracker_type, frame, detectBox)
-            if (newTrackerOk):
-                print("Frame: " + str(count) + "  Reacquire tracker due to distance " + str(d))
-                tracker = newTracker
-                trackerOk = newTrackerOk
-                trackBox = newTrackBox
-                #trackerOk, trackBox = tracker.update(frame)
-        
-        drawBox(frame, trackBox, green)
-    elif (trackerOk and detectConf <= 0):
-        drawBox(frame, trackBox, green)  
-    
+    # Draw bounding box
+    p1 = (int(bbox[0]), int(bbox[1]))
+    p2 = (int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3]))
+    cv2.rectangle(frame, p1, p2, green, 2, 1)    
+    if trackerOk:
+        # Tracking success
+        pass
+    else:
+        # Tracking failure
+        cv2.putText(frame, "Tracking failure detected", (20,80), cv2.FONT_HERSHEY_SIMPLEX, 0.75, red, 2)
+
     # Display tracker type on frame
     cv2.putText(frame, tracker_type + " Tracker", (20,20), cv2.FONT_HERSHEY_SIMPLEX, 0.75, green, 2);
     
@@ -336,26 +254,22 @@ while True:
     cv2.putText(frame, label2, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, green, 2);
 
     # Put efficiency information. The function getPerfProfile returns the overall time for inference(t) and the timings for each of the layers(in layersTimes)
-    label = 'Detect time: %.2f ms' % (detectTiming * 1000.0 / cv2.getTickFrequency())
+    label = 'Detect time: %.2f ms' % (t * 1000.0 / cv2.getTickFrequency())
     cv2.putText(frame, label, (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.75, blue, 2)
-  
+    
     # Write frame
     outVideo.write(frame);
   
     # Display frame
     cv2.imshow(windowName, frame);
-    if (trackerOk):
-        cv2.waitKey(1);
-    else:
-        cv2.waitKey(1); # slow-mo
-        
+    cv2.waitKey(1);
     
     # Exit
     count += 1
-    if count == 750:
+    if count == 75000000:
         break
 
-cv2.waitKey(3000)
+cv2.waitKey(1000)
 video.release()
 outVideo.release()
 cv2.destroyAllWindows()
